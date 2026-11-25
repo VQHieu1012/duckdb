@@ -252,6 +252,61 @@ For development, DuckDB requires [CMake](https://cmake.org), Python 3 and a `C++
 
 Please also refer to our [Build Guide](https://duckdb.org/docs/current/dev/building/overview) and [Contribution Guide](CONTRIBUTING.md).
 
+## Installation
+
+Prebuilt Python wheels are available on the [GitHub Releases](https://github.com/VQHieu1012/duckdb/releases) page.
+
+### Requirements
+
+- CPython 3.12 or later.
+- Linux x86_64.
+- glibc 2.27 or later, with compatible runtime libraries.
+
+The wheel uses Python's Stable ABI (`abi3`) and has been runtime-tested on Debian Bookworm with Python 3.12.
+
+### Install with pip
+
+```bash
+pip install "https://github.com/VQHieu1012/duckdb/releases/download/v2.0.0-custom.1/duckdb-2.0.0.dev2611250857-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+```
+
+### Install with uv
+
+```bash
+uv add "https://github.com/VQHieu1012/duckdb/releases/download/v2.0.0-custom.1/duckdb-2.0.0.dev2611250857-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+```
+
+### Verify Installation
+
+```python
+import duckdb
+
+print(duckdb.__version__)
+print(duckdb.sql("PRAGMA version").fetchall())
+```
+
+Expected output:
+
+```text
+2.0.0.dev2611250857
+[('v2.0.0-dev88618', '9d56720cc0', 'Development Version')]
+```
+
+The custom package retains the original `duckdb` package name and Python import API. However, it includes upstream DuckDB 2.0 Python API changes and additional CSV reader options.
+
+### Available Platforms
+
+| Platform | Python | Status |
+|---|---|---|
+| Linux x86_64 | CPython 3.12+ | Wheel available |
+| Linux ARM64 | — | Not available |
+| Windows | — | Not available |
+| macOS | — | Not available |
+
+For other platforms, build from source.
+
+This is an unofficial DuckDB distribution maintained independently from the upstream project.
+
 ## Support
 
 See the [Support Options](https://ducklabs.com/support/) page and the dedicated [`endoflife.date`](https://endoflife.date/duckdb) page.
