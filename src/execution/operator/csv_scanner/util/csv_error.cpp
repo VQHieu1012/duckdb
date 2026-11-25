@@ -66,7 +66,11 @@ void CSVErrorHandler::Error(const CSVError &csv_error, bool force_error) {
 	if (!force_error && ignore_errors) {
 		// We are ignoring this error - it is only kept if something (e.g. the rejects table) will read it
 		if (store_ignored_errors) {
-			errors.push_back(csv_error);
+			constexpr idx_t MAX_CACHED_ERRORS = 1000;
+
+			if (errors.size() < MAX_CACHED_ERRORS) {
+				errors.push_back(csv_error);
+			}
 		}
 		return;
 	}
