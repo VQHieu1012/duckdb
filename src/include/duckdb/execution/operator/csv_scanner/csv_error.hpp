@@ -10,6 +10,7 @@
 
 #include "duckdb/common/typedefs.hpp"
 #include "duckdb/common/mutex.hpp"
+#include "duckdb/common/file_system.hpp"
 #include "duckdb/common/unordered_map.hpp"
 #include "duckdb/common/case_insensitive_map.hpp"
 #include "duckdb/common/types/string_type.hpp"
@@ -116,6 +117,28 @@ public:
 	optional_idx byte_position;
 };
 
+class CSVRejectFileWriter {
+public:
+	CSVRejectFileWriter(ClientContext &context, const string &path, idx_t buffer_size, idx_t rejects_limit);
+
+	void Append(const CSVError &error);
+	void Flush();
+	void Close();
+
+private:
+	unique_ptr<FileHandle> file_handle;
+
+	string buffer;
+	idx_t buffer_size;
+	idx_t rejects_limit;
+	idx_t written_errors = 0;
+	bool closed = false;
+
+	static string EscapeJSON(const string &value);
+	static string Serialize(const CSVError &error);
+	void Write(string &data);
+};
+
 class CSVErrorHandler {
 public:
 	//! If store_ignored_errors is false, ignored errors are dropped instead of kept for the rejects table
@@ -146,6 +169,10 @@ public:
 	void FillRejectsTable(InternalAppender &errors_appender, idx_t file_idx, idx_t scan_idx, const CSVFileScan &file,
 	                      CSVRejectsTable &rejects, const vector<Identifier> &column_names, idx_t limit);
 
+	void InitializeRejectWriter(ClientContext &context, const CSVReaderOptions &options);
+
+	void CloseRejectWriter();
+
 private:
 	//! Private methods should always be locked by parent method.
 	//! If we should print the line of an error
@@ -167,6 +194,7 @@ private:
 	bool print_line = true;
 	//! Set of errors
 	vector<CSVError> errors;
+	unique_ptr<CSVRejectFileWriter> reject_writer;
 };
 
 } // namespace duckdb

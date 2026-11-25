@@ -61,11 +61,20 @@ void CSVErrorHandler::ThrowError(const CSVError &csv_error) {
 	}
 }
 
+bool IsCSVErrorAcceptedReject(CSVErrorType type);
+
 void CSVErrorHandler::Error(const CSVError &csv_error, bool force_error) {
 	lock_guard<mutex> parallel_lock(main_mutex);
 	if (!force_error && ignore_errors) {
-		// We are ignoring this error - it is only kept if something (e.g. the rejects table) will read it
 		if (store_ignored_errors) {
+			// File-based reject handling
+			if (reject_writer) {
+				if (IsCSVErrorAcceptedReject(csv_error.type)) {
+					reject_writer->Append(csv_error);
+				}
+				return;
+			}
+			// Existing table-based reject handling
 			constexpr idx_t MAX_CACHED_ERRORS = 1000;
 
 			if (errors.size() < MAX_CACHED_ERRORS) {
@@ -161,6 +170,106 @@ idx_t CSVErrorHandler::GetSize() {
 	return errors.size();
 }
 
+CSVRejectFileWriter::CSVRejectFileWriter(ClientContext &context, const string &path, idx_t buffer_size_p,
+                                         idx_t rejects_limit_p)
+    : buffer_size(buffer_size_p), rejects_limit(rejects_limit_p) {
+	auto &fs = FileSystem::GetFileSystem(context);
+
+	file_handle = fs.OpenFile(path, FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE |
+	                                    FileFlags::FILE_FLAGS_EXCLUSIVE_CREATE);
+}
+
+string CSVRejectFileWriter::EscapeJSON(const string &value) {
+	string result;
+
+	static const char hex[] = "0123456789abcdef";
+
+	for (unsigned char c : value) {
+		switch (c) {
+		case '"':
+			result += "\\\"";
+			break;
+		case '\\':
+			result += "\\\\";
+			break;
+		case '\n':
+			result += "\\n";
+			break;
+		case '\r':
+			result += "\\r";
+			break;
+		case '\t':
+			result += "\\t";
+			break;
+		default:
+			if (c < 0x20) {
+				result += "\\u00";
+				result += hex[c >> 4];
+				result += hex[c & 0x0F];
+			} else {
+				result += static_cast<char>(c);
+			}
+		}
+	}
+	return result;
+}
+
+void CSVRejectFileWriter::Write(string &data) {
+	idx_t offset = 0;
+
+	while (offset < data.size()) {
+		auto written = file_handle->Write(&data[offset], data.size() - offset);
+
+		if (written <= 0) {
+			throw IOException("Failed to write CSV reject data");
+		}
+
+		offset += static_cast<idx_t>(written);
+	}
+}
+
+void CSVRejectFileWriter::Flush() {
+	if (buffer.empty()) {
+		return;
+	}
+
+	Write(buffer);
+	buffer.clear();
+}
+
+void CSVRejectFileWriter::Close() {
+	if (closed) {
+		return;
+	}
+
+	Flush();
+	file_handle->Close();
+	closed = true;
+}
+
+void CSVRejectFileWriter::Append(const CSVError &error) {
+	if (closed) {
+		throw InternalException("CSV reject writer is already closed");
+	}
+
+	if (rejects_limit != 0 && written_errors >= rejects_limit) {
+		return;
+	}
+
+	auto record = Serialize(error);
+
+	if (record.size() > buffer_size) {
+		Flush();
+		Write(record);
+	} else {
+		if (record.size() > buffer_size - buffer.size()) {
+			Flush();
+		}
+		buffer += record;
+	}
+	written_errors++;
+}
+
 bool IsCSVErrorAcceptedReject(CSVErrorType type) {
 	switch (type) {
 	case CSVErrorType::INVALID_STATE:
@@ -194,6 +303,34 @@ string CSVErrorTypeToEnum(CSVErrorType type) {
 	default:
 		throw InternalException("CSV Error is not valid to be stored in a Rejects Table");
 	}
+}
+
+string CSVRejectFileWriter::Serialize(const CSVError &error) {
+	string result;
+
+	result += "{\"line_byte_position\":";
+	result += std::to_string(error.row_byte_position + 1);
+
+	result += ",\"byte_position\":";
+
+	if (error.byte_position.IsValid()) {
+		result += std::to_string(error.byte_position.GetIndex() + 1);
+	} else {
+		result += "null";
+	}
+
+	result += ",\"error_type\":\"";
+	result += EscapeJSON(CSVErrorTypeToEnum(error.type));
+
+	result += "\",\"value\":\"";
+	result += EscapeJSON(error.csv_row);
+
+	result += "\",\"error_message\":\"";
+	result += EscapeJSON(error.error_message);
+
+	result += "\"}\n";
+
+	return result;
 }
 
 void CSVErrorHandler::FillRejectsTable(InternalAppender &errors_appender, const idx_t file_idx, const idx_t scan_idx,
@@ -281,6 +418,25 @@ void CSVErrorHandler::DontPrintErrorLine() {
 void CSVErrorHandler::SetIgnoreErrors(bool ignore_errors_p) {
 	lock_guard<mutex> parallel_lock(main_mutex);
 	ignore_errors = ignore_errors_p;
+}
+
+void CSVErrorHandler::InitializeRejectWriter(ClientContext &context, const CSVReaderOptions &options) {
+	lock_guard<mutex> parallel_lock(main_mutex);
+
+	if (options.rejects_path.empty() || reject_writer) {
+		return;
+	}
+
+	reject_writer = make_uniq<CSVRejectFileWriter>(context, options.rejects_path, options.rejects_buffer_size,
+	                                               options.rejects_limit);
+}
+
+void CSVErrorHandler::CloseRejectWriter() {
+	lock_guard<mutex> parallel_lock(main_mutex);
+
+	if (reject_writer) {
+		reject_writer->Close();
+	}
 }
 
 CSVError::CSVError(string error_message_p, CSVErrorType type_p, LinesPerBoundary error_info_p)

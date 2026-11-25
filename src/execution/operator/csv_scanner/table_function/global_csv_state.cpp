@@ -18,6 +18,9 @@ CSVGlobalState::CSVGlobalState(ClientContext &context_p, ReadCSVData &csv_data_p
     : context(context_p), csv_data(csv_data_p), scan_op(scan_op_p), total_file_count(total_file_count_p),
       column_names(column_names_p), sniffer_mismatch_error(csv_data_p.options.sniffer_user_mismatch_error) {
 	auto &options = csv_data.options;
+	if (!options.rejects_path.empty() && total_file_count != 1) {
+		throw InvalidInputException("REJECTS_PATH currently supports single-file scans only");
+	}
 	// There are situations where we only support single threaded scanning
 	auto system_threads = context.db->NumberOfThreads();
 	bool many_csv_files = total_file_count > 1 && total_file_count > system_threads * 2;
@@ -97,7 +100,7 @@ void CSVLocalState::Materialize() {
 	D_ASSERT(claim_state == ClaimState::PENDING && !csv_reader);
 	csv_reader =
 	    make_uniq<StringValueScanner>(scanner_idx, file_scan->buffer_manager, file_scan->state_machine,
-	                                  file_scan->error_handler, file_scan, false, iterator, STANDARD_VECTOR_SIZE, true);
+		                              file_scan->error_handler, file_scan, false, iterator, STANDARD_VECTOR_SIZE, true);
 	csv_reader->buffer_tracker = std::move(buffer_tracker);
 	file_scan.reset();
 	claim_state = ClaimState::MATERIALIZED;
@@ -107,6 +110,7 @@ bool CSVGlobalState::Next(shared_ptr<CSVFileScan> &current_file_ptr, CSVLocalSta
 	auto &current_file = *current_file_ptr;
 	if (!initialized) {
 		// initialize the boundary for this file
+		current_file.error_handler->InitializeRejectWriter(context, csv_data.options);
 		current_boundary = current_file.start_iterator;
 		current_boundary.SetCurrentBoundaryToPosition(single_threaded, current_file.options);
 		current_buffer_in_use =
@@ -153,7 +157,12 @@ void CSVGlobalState::FinishFile(CSVFileScan &scan) {
 		scan.validator.Verify();
 	}
 	scan.error_handler->ErrorIfAny();
-	FillRejectsTable(scan);
+
+	if (!csv_data.options.rejects_path.empty()) {
+		scan.error_handler->CloseRejectWriter();
+	} else {
+		FillRejectsTable(scan);
+	}
 }
 
 void FillScanErrorTable(InternalAppender &scan_appender, idx_t scan_idx, idx_t file_idx, CSVFileScan &file) {
@@ -222,7 +231,6 @@ void FillScanErrorTable(InternalAppender &scan_appender, idx_t scan_idx, idx_t f
 
 void CSVGlobalState::FillRejectsTable(CSVFileScan &scan) {
 	auto &options = csv_data.options;
-
 	if (!options.store_rejects.GetValue()) {
 		return;
 	}
