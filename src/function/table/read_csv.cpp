@@ -89,6 +89,8 @@ void ReadCSVTableFunction::ReadCSVAddNamedParameters(TableFunction &table_functi
 		    .Add("rejects_table", LogicalType::VARCHAR)
 		    .Add("rejects_scan", LogicalType::VARCHAR)
 		    .Add("rejects_limit", LogicalType::BIGINT)
+		    .Add("rejects_path", LogicalType::VARCHAR)
+		    .Add("rejects_buffer_size", LogicalType::BIGINT)
 		    .Add("rejects_line_size_limit", LogicalType::BIGINT)
 		    .Add("force_not_null", LogicalType::LIST(LogicalType::VARCHAR))
 		    .Add("buffer_size", LogicalType::BIGINT)

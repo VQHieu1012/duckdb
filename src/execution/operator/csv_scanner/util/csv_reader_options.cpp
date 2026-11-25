@@ -363,6 +363,18 @@ void CSVReaderOptions::SetReadOption(const Identifier &loption, const Value &val
 			throw BinderException("Unsupported parameter for REJECTS_LIMIT: cannot be negative");
 		}
 		rejects_limit = NumericCast<idx_t>(limit);
+	} else if (loption == "rejects_path") {
+		auto path = ParseString(value, loption);
+		if (path.empty()) {
+			throw BinderException("REJECTS_PATH cannot be empty");
+		}
+		rejects_path = std::move(path);
+	} else if (loption == "rejects_buffer_size") {
+		auto size = ParseInteger(value, loption);
+		if (size <= 0) {
+			throw BinderException("REJECTS_BUFFER_SIZE must be greater than 0");
+		}
+		rejects_buffer_size = NumericCast<idx_t>(size);
 	} else if (loption == "rejects_line_size_limit") {
 		auto limit = ParseInteger(value, loption);
 		if (limit < 0) {
@@ -616,6 +628,11 @@ void CSVReaderOptions::Verify(MultiFileOptions &file_options) {
 	if (rejects_limit != 0 && !store_rejects.GetValue()) {
 		throw BinderException("REJECTS_LIMIT option is only supported when REJECTS_TABLE is set to a table name");
 	}
+
+	if (!rejects_path.empty() && !store_rejects.GetValue()) {
+		throw BinderException("REJECTS_PATH requires STORE_REJECTS=true");
+	}
+
 	// Validate CSV Buffer and max_line_size do not conflict.
 	if (buffer_size_option.IsSetByUser() && maximum_line_size.IsSetByUser()) {
 		if (buffer_size_option.GetValue() < maximum_line_size.GetValue()) {

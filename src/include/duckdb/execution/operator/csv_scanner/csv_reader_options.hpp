@@ -54,6 +54,11 @@ struct CSVReaderOptions {
 	CSVOption<string> rejects_scan_name = {"reject_scans"};
 	//! Rejects table entry limit (0 = no limit)
 	idx_t rejects_limit = 0;
+	//! Output path for rejected CSV records.
+	//! Empty path means use the existing rejects table.
+	string rejects_path;
+	//! Maximum reject buffer size in bytes.
+	idx_t rejects_buffer_size = 8 * 1024 * 1024;
 	//! Rejects line size limit (0 = no limit)
 	idx_t rejects_line_size_limit = 10000;
 	//! Number of samples to buffer
